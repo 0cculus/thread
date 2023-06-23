@@ -6,7 +6,7 @@
 /*   By: brheaume <marvin@42quebec.com>             +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2023/06/09 10:17:33 by brheaume          #+#    #+#             */
-/*   Updated: 2023/06/23 15:01:45 by brheaume         ###   ########.fr       */
+/*   Updated: 2023/06/23 18:04:47 by brheaume         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -15,6 +15,7 @@
 # include <stdio.h>
 # include <unistd.h>
 # include <sys/time.h>
+# include <strings.h>
 
 # define THINK 10
 # define CORRECT 1
@@ -33,8 +34,8 @@ typedef struct s_info
 
 typedef struct s_key
 {
-	pthread_mutex_t	mutex;
 	short			lock;
+	pthread_mutex_t	mutex;
 }	t_key;
 
 typedef struct s_phi
@@ -57,9 +58,10 @@ typedef struct s_data
 	int				nb_phi;
 	pthread_mutex_t	scribe;
 	int				nb_meals;
-	short			all_alive;
+	int				all_alive;
 	pthread_mutex_t	key_seeker;
 	pthread_mutex_t	death_seeker;
+	int				all_you_can_eat;
 }	t_data;
 
 long long	ft_get_time(void)
@@ -95,17 +97,16 @@ void	ft_print(t_phi *p, char *src)
 	pthread_mutex_unlock(&p->data->scribe);
 }
 
-int	ft_samael(t_phi *p)
+void	ft_samael(t_phi *p)
 {
 	pthread_mutex_lock(&p->data->death_seeker);
-	if (p->alive)
+	if (p->data->all_alive)
 	{
 		p->alive = INCORRECT;
 		p->data->all_alive = INCORRECT;
 		ft_print(p, "is deadge, smodge smodge");
 	}
 	pthread_mutex_unlock(&p->data->death_seeker);
-	return (INCORRECT);
 }
 
 void	ft_slumber(t_phi *p, long long current)
@@ -123,7 +124,7 @@ void	ft_slumber(t_phi *p, long long current)
 	{
 		usleep(current * MILLI_SEC * 0.9);
 		while (ft_get_time() < current + start)
-			usleep (0.15 * MILLI_SEC);
+			usleep (150);
 	}
 }
 
@@ -133,15 +134,15 @@ int	ft_fetch_key(t_phi *p)
 
 	pthread_mutex_lock(&p->data->key_seeker);
 	if (p->left == p->right)
-		res = 0;
+		res = INCORRECT;
 	else if (!p->right->lock && !p->left->lock)
 	{
 		p->left->lock = CORRECT;
 		p->right->lock = CORRECT;
-		res = 1;
+		res = CORRECT;
 	}
 	else
-		res = 0;
+		res = INCORRECT;
 	pthread_mutex_unlock(&p->data->key_seeker);
 	return (res);
 }
@@ -152,22 +153,27 @@ int	ft_phi_eat(t_phi *p)
 	while (!ft_fetch_key(p) || p->last_meal <= ft_get_time())
 	{
 		if (p->last_meal <= ft_get_time())
-			return (ft_samael(p));
-		if (p->data->all_alive)
+		{
+			ft_samael(p);
+			return (INCORRECT);
+		}
+		if (ft_azrael(p))
 			break ;
 		usleep(100);
 	}
-	pthread_mutex_lock(&p->right->mutex);
-	ft_print(p, "has taken his right fork");
 	pthread_mutex_lock(&p->left->mutex);
 	ft_print(p, "has taken his left fork");
+	pthread_mutex_lock(&p->right->mutex);
+	ft_print(p, "has taken his right fork");
 	ft_print(p, "is eating");
 	p->last_meal = ft_get_time() + p->data->info.time_death;
 	ft_slumber(p, p->data->info.time_eat);
-	pthread_mutex_unlock(&p->right->mutex);
-	p->left->lock = INCORRECT;
 	pthread_mutex_unlock(&p->left->mutex);
+	pthread_mutex_unlock(&p->right->mutex);
+	pthread_mutex_lock(&p->data->key_seeker);
+	p->left->lock = INCORRECT;
 	p->right->lock = INCORRECT;
+	pthread_mutex_unlock(&p->data->key_seeker);
 	return (CORRECT);
 }
 
@@ -190,16 +196,19 @@ void	*ft_lives(void *arg)
 	t_phi	*p;
 
 	p = (t_phi *)arg;
-	if (p->id % 2)
-		ft_phi_think(p, p->data->info.time_eat);
+	if (!(p->id % 2))
+	{
+		ft_print(p, "is on hold");
+		usleep(p->data->info.time_eat / 2 * MILLI_SEC);
+	}
 	while (!ft_azrael(p))
 	{
 		ft_print(p, "is thinking");
 		if (!ft_azrael(p))
 			ft_phi_eat(p);
-		if (p->nb_meals)
+		if (!p->data->all_you_can_eat)
 			p->nb_meals--;
-		if (!p->nb_meals)
+		if (!p->nb_meals && p->data->all_you_can_eat)
 			return (NULL);
 		if (!ft_azrael(p))
 			ft_print(p, "is sleeping");
@@ -221,7 +230,7 @@ int	ft_join_phi(int nb_p, t_data *data)
 
 int	ft_init_keys(int nb, t_data *data)
 {
-	data->keys = calloc(nb, sizeof(pthread_mutex_t));
+	data->keys = calloc(nb, sizeof(t_key));
 	if (!data->keys)
 		return (INCORRECT);
 	while (nb--)
@@ -237,20 +246,24 @@ int	ft_init_keys(int nb, t_data *data)
 	return (CORRECT);
 }
 
-void	ft_init_data(char **av, int ac, int size, t_data *data)
+void	ft_init_data(char **av, int ac, t_data *data)
 {
 	t_info	info;
 
+	bzero(data, sizeof(t_data));
+	bzero(&info, sizeof(t_info));
 	info.time_death = atol(av[2]);
 	info.time_eat = atol(av[3]);
 	info.time_sleep = atol(av[4]);
 	info.time_think = 30;
+	data->all_alive = CORRECT;
 	if (ac == 6)
+	{
+		data->all_you_can_eat = INCORRECT;
 		data->nb_meals = atol(av[5]);
+	}
 	else
-		data->nb_meals = -1;
-	while (size--)
-		data->phi[size].data->info = info;
+		data->all_you_can_eat = CORRECT;
 }
 
 int ft_release(int nb_p, t_data *data)
@@ -320,11 +333,11 @@ int	main(int ac, char **av)
 	if (ac == 5 || ac == 6)
 	{
 		nb_p = atoi(av[1]);
+		ft_init_data(av, ac, &data);
 		if (!ft_init_keys(nb_p, &data))
 			return (ft_purge(&data, INCORRECT_EXIT));
 		if (!ft_init_phi(nb_p, &data))
 			return (ft_purge(&data, INCORRECT_EXIT));
-		ft_init_data(av, ac, nb_p, &data);
 		if (!ft_release(nb_p, &data))
 			return (ft_purge(&data, INCORRECT_EXIT));
 		if (!ft_join_phi(nb_p, &data))
