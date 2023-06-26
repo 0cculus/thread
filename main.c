@@ -6,7 +6,7 @@
 /*   By: brheaume <marvin@42quebec.com>             +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2023/06/09 10:17:33 by brheaume          #+#    #+#             */
-/*   Updated: 2023/06/23 18:04:47 by brheaume         ###   ########.fr       */
+/*   Updated: 2023/06/26 16:30:54 by brheaume         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -16,6 +16,7 @@
 # include <unistd.h>
 # include <sys/time.h>
 # include <strings.h>
+# include <limits.h>
 
 # define THINK 10
 # define CORRECT 1
@@ -24,17 +25,19 @@
 # define INCORRECT_EXIT 1
 # define MILLI_SEC 1000
 
+typedef long long	t_chrono;
+
 typedef struct s_info
 {
-	int	time_eat;
-	int	time_death;
-	int	time_sleep;
-	int	time_think;
+	t_chrono	time_eat;
+	t_chrono	time_death;
+	t_chrono	time_sleep;
+	t_chrono	time_think;
 }	t_info;
 
 typedef struct s_key
 {
-	short			lock;
+	int				lock;
 	pthread_mutex_t	mutex;
 }	t_key;
 
@@ -43,11 +46,11 @@ typedef struct s_phi
 	int				id;
 	pthread_t		tid;
 	struct s_data	*data;
-	int				alive;
+	int				dead;
 	t_key			*left;
 	t_key			*right;
 	int				nb_meals;
-	long long		last_meal;
+	t_chrono		last_meal;
 }	t_phi;
 
 typedef struct s_data
@@ -58,13 +61,13 @@ typedef struct s_data
 	int				nb_phi;
 	pthread_mutex_t	scribe;
 	int				nb_meals;
-	int				all_alive;
+	int				all_dead;
 	pthread_mutex_t	key_seeker;
 	pthread_mutex_t	death_seeker;
 	int				all_you_can_eat;
 }	t_data;
 
-long long	ft_get_time(void)
+t_chrono	ft_get_time(void)
 {
 	static struct timeval	start = {-1, -1};
 	struct timeval			current;
@@ -81,7 +84,7 @@ int	ft_azrael(t_phi *p)
 	int	reap;
 
 	pthread_mutex_lock(&p->data->death_seeker);
-	if (!p->data->all_alive)
+	if (p->data->all_dead)
 		reap = CORRECT;
 	else
 		reap = INCORRECT;
@@ -92,7 +95,7 @@ int	ft_azrael(t_phi *p)
 void	ft_print(t_phi *p, char *src)
 {
 	pthread_mutex_lock(&p->data->scribe);
-	if (!ft_azrael(p) || (ft_azrael(p) && !p->alive))
+	if (!ft_azrael(p) || (ft_azrael(p) && p->dead))
 		printf ("%lld %d %s\n", ft_get_time(), p->id, src);
 	pthread_mutex_unlock(&p->data->scribe);
 }
@@ -100,21 +103,23 @@ void	ft_print(t_phi *p, char *src)
 void	ft_samael(t_phi *p)
 {
 	pthread_mutex_lock(&p->data->death_seeker);
-	if (p->data->all_alive)
+	if (!p->data->all_dead)
 	{
-		p->alive = INCORRECT;
-		p->data->all_alive = INCORRECT;
+		p->dead = CORRECT;
+		p->data->all_dead = CORRECT;
+		pthread_mutex_unlock(&p->data->death_seeker);
 		ft_print(p, "is deadge, smodge smodge");
+		return ;
 	}
 	pthread_mutex_unlock(&p->data->death_seeker);
 }
 
-void	ft_slumber(t_phi *p, long long current)
+void	ft_slumber(t_phi *p, t_chrono current)
 {
-	long long	start;
+	t_chrono	start;
 
 	start = ft_get_time();
-	if (p->last_meal < current + start && p->alive && \
+	if (p->last_meal < current + start && !p->dead && \
 		p->last_meal > start)
 	{
 		usleep((p->last_meal - start) * MILLI_SEC);
@@ -124,7 +129,7 @@ void	ft_slumber(t_phi *p, long long current)
 	{
 		usleep(current * MILLI_SEC * 0.9);
 		while (ft_get_time() < current + start)
-			usleep (150);
+			usleep (MILLI_SEC);
 	}
 }
 
@@ -147,24 +152,24 @@ int	ft_fetch_key(t_phi *p)
 	return (res);
 }
 
-int	ft_phi_eat(t_phi *p)
+void	ft_phi_eat(t_phi *p)
 {
-	usleep(500);
+	usleep(150);
 	while (!ft_fetch_key(p) || p->last_meal <= ft_get_time())
 	{
 		if (p->last_meal <= ft_get_time())
 		{
 			ft_samael(p);
-			return (INCORRECT);
+			return ;
 		}
 		if (ft_azrael(p))
 			break ;
 		usleep(100);
 	}
 	pthread_mutex_lock(&p->left->mutex);
-	ft_print(p, "has taken his left fork");
+	ft_print(p, "has taken a fork");
 	pthread_mutex_lock(&p->right->mutex);
-	ft_print(p, "has taken his right fork");
+	ft_print(p, "has taken a fork");
 	ft_print(p, "is eating");
 	p->last_meal = ft_get_time() + p->data->info.time_death;
 	ft_slumber(p, p->data->info.time_eat);
@@ -174,21 +179,6 @@ int	ft_phi_eat(t_phi *p)
 	p->left->lock = INCORRECT;
 	p->right->lock = INCORRECT;
 	pthread_mutex_unlock(&p->data->key_seeker);
-	return (CORRECT);
-}
-
-int	ft_phi_sleep(t_phi *p)
-{
-	ft_print(p, "is sleeping");
-	usleep(p->data->info.time_sleep * MILLI_SEC);
-	return (CORRECT);
-}
-
-int	ft_phi_think(t_phi *p, int time)
-{
-	ft_print(p, "is thinking");
-	usleep(time * MILLI_SEC);
-	return (CORRECT);
 }
 
 void	*ft_lives(void *arg)
@@ -196,17 +186,17 @@ void	*ft_lives(void *arg)
 	t_phi	*p;
 
 	p = (t_phi *)arg;
-	if (!(p->id % 2))
-	{
-		ft_print(p, "is on hold");
-		usleep(p->data->info.time_eat / 2 * MILLI_SEC);
-	}
+	if (p->data->all_you_can_eat && !p->nb_meals)
+		return (NULL);
+	p->last_meal = ft_get_time() + p->data->info.time_death;
+	if (p->id & 1)
+		ft_slumber(p, p->data->info.time_eat);
 	while (!ft_azrael(p))
 	{
 		ft_print(p, "is thinking");
 		if (!ft_azrael(p))
 			ft_phi_eat(p);
-		if (!p->data->all_you_can_eat)
+		if (p->data->all_you_can_eat)
 			p->nb_meals--;
 		if (!p->nb_meals && p->data->all_you_can_eat)
 			return (NULL);
@@ -223,27 +213,27 @@ int	ft_join_phi(int nb_p, t_data *data)
 
 	i = 0;
 	while (i < nb_p)
-		if (!pthread_join(data->phi[i++].tid, NULL))
-			return (INCORRECT);
-	return (CORRECT);
+		if (pthread_join(data->phi[i++].tid, NULL) != 0)
+			return (INCORRECT_EXIT);
+	return (CORRECT_EXIT);
 }
 
-int	ft_init_keys(int nb, t_data *data)
+int	ft_init_keys(int nb_p, t_data *data)
 {
-	data->keys = calloc(nb, sizeof(t_key));
+	data->keys = calloc(nb_p, sizeof(t_key));
 	if (!data->keys)
-		return (INCORRECT);
-	while (nb--)
+		return (INCORRECT_EXIT);
+	while (nb_p--)
 	{
-		data->keys[nb].lock = INCORRECT;
-		if (pthread_mutex_init(&data->keys[nb].mutex, NULL) != 0)
-			return (INCORRECT);
+		data->keys[nb_p].lock = INCORRECT;
+		if (pthread_mutex_init(&data->keys[nb_p].mutex, NULL) != 0)
+			return (INCORRECT_EXIT);
 	}
 	if (pthread_mutex_init(&data->death_seeker, NULL) != 0 || \
 	pthread_mutex_init(&data->key_seeker, NULL) != 0 || \
 	pthread_mutex_init(&data->scribe, NULL) != 0)
-		return (INCORRECT);
-	return (CORRECT);
+		return (INCORRECT_EXIT);
+	return (CORRECT_EXIT);
 }
 
 void	ft_init_data(char **av, int ac, t_data *data)
@@ -256,64 +246,62 @@ void	ft_init_data(char **av, int ac, t_data *data)
 	info.time_eat = atol(av[3]);
 	info.time_sleep = atol(av[4]);
 	info.time_think = 30;
-	data->all_alive = CORRECT;
 	if (ac == 6)
 	{
-		data->all_you_can_eat = INCORRECT;
+		data->all_you_can_eat = CORRECT;
 		data->nb_meals = atol(av[5]);
 	}
 	else
-		data->all_you_can_eat = CORRECT;
+		data->all_you_can_eat = INCORRECT;
+	data->info = info;
 }
 
 int ft_release(int nb_p, t_data *data)
 {
 	int	current;
 
-	current = nb_p;
-	while (current--)
+	current = -1;
+	while (++current < nb_p)
 		if (pthread_create(&data->phi[current].tid,
 			NULL, &ft_lives, &data->phi[current]) != 0)
-			return (INCORRECT);
-	return (CORRECT);
+			return (INCORRECT_EXIT);
+	return (CORRECT_EXIT);
 }
 
-int	ft_init_phi(int size, t_data *data)
+int	ft_init_phi(int nb_p, t_data *data)
 {
 	int		current;
-	t_phi	*phi;
 
-	current = size;
-	phi = calloc(size, sizeof(t_phi));
-	if (!phi)
-		return (INCORRECT);
-	while (current--)
+	current = -1;
+	data->phi = calloc(nb_p, sizeof(t_phi));
+	if (!data->phi)
+		return (INCORRECT_EXIT);
+	while (++current < nb_p)
 	{
-		phi[current].last_meal = data->info.time_death;
-		phi[current].data = data;
-		phi[current].alive = CORRECT;
-		phi[current].id = current + 1;
-		phi[current].right = &data->keys[current];
+		data->phi[current].last_meal = data->info.time_death;
+		data->phi[current].id = current + 1;
+		data->phi[current].data = data;
+		data->phi[current].dead = INCORRECT;
+		data->phi[current].nb_meals = data->nb_meals;
 		if (current != 0)
-			phi[current].left = &data->keys[current - 1];
+			data->phi[current].left = &data->keys[current - 1];
 		else
-			phi[current].left = &data->keys[size - 1];
-		phi[current].nb_meals = data->nb_meals;
+			data->phi[current].left = &data->keys[nb_p - 1];
+		data->phi[current].right = &data->keys[current];
 	}
-	data->phi = phi;
-	return (CORRECT);
+	return (CORRECT_EXIT);
 }
 
 int	ft_destroy(t_data *data, int nb)
 {
 	while (nb--)
 		if (pthread_mutex_destroy(&data->keys[nb].mutex))
-			return (INCORRECT);
+			return (INCORRECT_EXIT);
 	if (pthread_mutex_destroy(&data->scribe) || \
 		pthread_mutex_destroy(&data->key_seeker) || \
 		pthread_mutex_destroy(&data->death_seeker))
-		return (INCORRECT);
-	return (CORRECT);
+		return (INCORRECT_EXIT);
+	return (CORRECT_EXIT);
 }
 
 int	ft_purge(t_data *data, int res)
@@ -325,24 +313,46 @@ int	ft_purge(t_data *data, int res)
 	return (res);
 }
 
+int	ft_verify_args(int ac, char **av)
+{
+	int	i;
+	long long current;
+
+	i = 2;
+	if (ac == 5 || ac == 6)
+	{
+		if (atol(av[1]) < 0 || atol(av[1]) > 500)
+			return (INCORRECT);
+		while (av[i])
+		{
+			current = atol(av[i]);
+			if (current < 60 || current > INT_MAX)
+				return (INCORRECT);
+			i++;
+		}
+		return (CORRECT);
+	}
+	return (INCORRECT);
+}
+
 int	main(int ac, char **av)
 {
 	t_data	data;
 	int		nb_p;
 
-	if (ac == 5 || ac == 6)
+	if (ft_verify_args(ac, av))
 	{
 		nb_p = atoi(av[1]);
 		ft_init_data(av, ac, &data);
-		if (!ft_init_keys(nb_p, &data))
+		if (ft_init_keys(nb_p, &data))
 			return (ft_purge(&data, INCORRECT_EXIT));
-		if (!ft_init_phi(nb_p, &data))
+		if (ft_init_phi(nb_p, &data))
 			return (ft_purge(&data, INCORRECT_EXIT));
-		if (!ft_release(nb_p, &data))
+		if (ft_release(nb_p, &data))
 			return (ft_purge(&data, INCORRECT_EXIT));
-		if (!ft_join_phi(nb_p, &data))
+		if (ft_join_phi(nb_p, &data))
 			return (ft_purge(&data, INCORRECT_EXIT));
-		if (!ft_destroy(&data, nb_p))
+		if (ft_destroy(&data, nb_p))
 			return (ft_purge(&data, INCORRECT_EXIT));
 		return (ft_purge(&data, CORRECT_EXIT));
 	}
