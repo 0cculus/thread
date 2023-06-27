@@ -6,7 +6,7 @@
 /*   By: brheaume <marvin@42quebec.com>             +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2023/06/26 16:56:59 by brheaume          #+#    #+#             */
-/*   Updated: 2023/06/26 17:00:21 by brheaume         ###   ########.fr       */
+/*   Updated: 2023/06/27 13:35:13 by brheaume         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -20,7 +20,7 @@ void	ft_samael(t_phi *p)
 		p->dead = CORRECT;
 		p->data->all_dead = CORRECT;
 		pthread_mutex_unlock(&p->data->death_seeker);
-		ft_print(p, "is deadge, smodge smodge");
+		ft_print(p, "\x1b[31mhas died\x1b[37m");
 		return ;
 	}
 	pthread_mutex_unlock(&p->data->death_seeker);
